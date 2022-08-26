@@ -28,6 +28,7 @@
 #include <vector>
 #include <string>
 #include <array>
+#include <arrayfire.h>
 
 namespace PLMD {
 
@@ -294,6 +295,16 @@ private:
   Tensor ddist_drr01;
   Tensor ddist_drotation;
   std::vector<Vector> d; // difference of components
+  af::array positions_device;
+  af::array reference_device;
+  af::array cp_device;
+  af::array cr_device;
+  af::array rr01_device;
+  af::array rotation_device;
+  af::array d_device;
+  af::array align_device;
+  af::array displace_device;
+  af::array ddist_drotation_device;
 public:
   /// the constructor (note: only references are passed, therefore is rather fast)
   /// note: this aligns the reference onto the positions
@@ -331,10 +342,14 @@ public:
   //  does the core calc : first thing to call after the constructor:
   // only_rotation=true does not retrieve the derivatives, just retrieve the optimal rotation (the same calc cannot be exploit further)
   void doCoreCalc(bool safe,bool alEqDis, bool only_rotation=false);
+  void doCoreCalc_cpu(bool safe,bool alEqDis, bool only_rotation=false);
+  void doCoreCalc_gpu(bool safe,bool alEqDis, bool only_rotation=false);
   // do calculation with close structure data structures
   void doCoreCalcWithCloseStructure(bool safe,bool alEqDis, const Tensor & rotationPosClose, const Tensor & rotationRefClose, std::array<std::array<Tensor,3>,3> & drotationPosCloseDrr01);
   // retrieve the distance if required after doCoreCalc
   double getDistance(bool squared);
+  double getDistance_cpu(bool squared);
+  double getDistance_gpu(bool squared);
   // retrieve the derivative of the distance respect to the position
   std::vector<Vector> getDDistanceDPositions();
   // retrieve the derivative of the distance respect to the reference
