@@ -33,7 +33,7 @@ private:
 public:
   explicit OptimalRMSD(const ReferenceConfigurationOptions& ro);
   void read( const PDB& ) override;
-  double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const override;
+  double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const override;
   bool pcaIsEnabledForThisReference() override { return true; }
   void setupRMSDObject() override { myrmsd.clear(); myrmsd.set(getAlign(),getDisplace(),getReferencePositions(),"OPTIMAL"); }
   void setupPCAStorage( ReferenceValuePack& mypack ) override {
@@ -59,7 +59,7 @@ void OptimalRMSD::read( const PDB& pdb ) {
   readReference( pdb ); setupRMSDObject();
 }
 
-double OptimalRMSD::calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const {
+double OptimalRMSD::calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
   double d;
   if( myder.calcUsingPCAOption() ) {
     std::vector<Vector> centeredreference( getNumberOfAtoms () );
@@ -67,11 +67,11 @@ double OptimalRMSD::calc( const std::vector<Vector>& pos, ReferenceValuePack& my
     unsigned nat = pos.size();
     for(unsigned i=0; i<nat; ++i) { myder.getAtomsDisplacementVector()[i] -= getReferencePosition(i); myder.getAtomsDisplacementVector()[i] *= getDisplace()[i]; }
   } else if( fast ) {
-    if( getAlign()==getDisplace() ) d=myrmsd.optimalAlignment<false,true>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared);
-    else d=myrmsd.optimalAlignment<false,false>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared);
+    if( getAlign()==getDisplace() ) d=myrmsd.optimalAlignment<false,true>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared,gpu);
+    else d=myrmsd.optimalAlignment<false,false>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared,gpu);
   } else {
-    if( getAlign()==getDisplace() ) d=myrmsd.optimalAlignment<true,true>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared);
-    else d=myrmsd.optimalAlignment<true,false>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared);
+    if( getAlign()==getDisplace() ) d=myrmsd.optimalAlignment<true,true>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared,gpu);
+    else d=myrmsd.optimalAlignment<true,false>(getAlign(),getDisplace(),pos,getReferencePositions(),myder.getAtomVector(),squared,gpu);
   }
   myder.clear(); for(unsigned i=0; i<pos.size(); ++i) myder.setAtomDerivatives( i, myder.getAtomVector()[i] );
   if( !myder.updateComplete() ) myder.updateDynamicLists();

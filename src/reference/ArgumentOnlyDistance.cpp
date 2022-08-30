@@ -43,7 +43,7 @@ double ArgumentOnlyDistance::calculate( const std::vector<Value*>& vals, Referen
 }
 
 double ArgumentOnlyDistance::calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& arg,
-                                   ReferenceValuePack& myder, const bool& squared ) const {
+                                   ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
   plumed_dbg_assert( pos.size()==0 );
   double d=calculateArgumentDistance( vals, arg, myder, squared );
   if( !myder.updateComplete() ) myder.updateDynamicLists();

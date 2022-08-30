@@ -29,14 +29,14 @@ RMSDBase::RMSDBase( const ReferenceConfigurationOptions& ro ):
 {
 }
 
-double RMSDBase::calculate( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const {
+double RMSDBase::calculate( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
 //  clearDerivatives();
-  return calc( pos, myder, squared );
+  return calc( pos, myder, squared, gpu );
 }
 
-double RMSDBase::calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared ) const {
+double RMSDBase::calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
   plumed_dbg_assert( pos.size()==getNumberOfAtoms() );
-  return calc( pos, myder, squared );
+  return calc( pos, myder, squared, false );
 }
 
 }

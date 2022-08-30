@@ -36,7 +36,7 @@ public:
   explicit Direction( const ReferenceConfigurationOptions& ro );
   void read( const PDB& ) override;
   double calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& args,
-               ReferenceValuePack& myder, const bool& squared ) const override;
+               ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const override;
   void setDirection( const std::vector<Vector>& conf, const std::vector<double>& args );
   void addDirection( const double& weight, const Direction& dir );
   void setReferenceAtoms( const std::vector<Vector>& conf, const std::vector<double>& align_in, const std::vector<double>& displace_in ) override { plumed_error(); }

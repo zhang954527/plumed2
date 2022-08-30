@@ -98,7 +98,7 @@ double MultiDomainRMSD::calculate( const std::vector<Vector>& pos, const Pbc& pb
     unsigned n=0; for(unsigned j=blocks[i]; j<blocks[i+1]; ++j) { tder.setAtomIndex(n,j); mypos[n]=pos[j]; n++; }
     for(unsigned k=n; k<getNumberOfAtoms(); ++k) tder.setAtomIndex(k,3*pos.size()+10);
     // This actually does the calculation
-    totd += weights[i]*domains[i]->calculate( mypos, pbc, tder, true );
+    totd += weights[i]*domains[i]->calculate( mypos, pbc, tder, true, false );
     // Now merge the derivative
     myder.copyScaledDerivatives( 0, weights[i], tvals );
     // If PCA copy PCA stuff
@@ -128,7 +128,7 @@ double MultiDomainRMSD::calculate( const std::vector<Vector>& pos, const Pbc& pb
 }
 
 double MultiDomainRMSD::calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& arg,
-                              ReferenceValuePack& myder, const bool& squared ) const {
+                              ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
   plumed_dbg_assert( vals.size()==0 && pos.size()==getNumberOfAtoms() && arg.size()==0 );
   return calculate( pos, pbc, myder, squared );
 }

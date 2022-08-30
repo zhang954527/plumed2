@@ -80,6 +80,11 @@ class RMSD
   Vector positions_center;
   bool positions_center_is_calculated;
   bool positions_center_is_removed;
+// arrayfire GPU for rmsd calculation
+  bool gpu;
+  af::array reference_device;
+  af::array align_device;
+  af::array displace_device;
 // calculates the center from the position provided
   Vector calculateCenter(const std::vector<Vector> &p,const std::vector<double> &w) {
     plumed_massert(p.size()==w.size(),"mismatch in dimension of position/align arrays while calculating the center");
@@ -116,6 +121,8 @@ public:
 /// set align
   void setDisplace(const std::vector<double> & displace, bool normalize_weights=true);
   std::vector<double> getDisplace();
+/// set arrayfire GPU using
+  void setGPU(const std::string & gpuuse);
 ///
   std::string getMethod();
 /// workhorses
@@ -127,11 +134,23 @@ public:
                          std::vector<Vector>  & displacement,
                          bool squared=false)const;
   template <bool safe,bool alEqDis>
-  double optimalAlignment(const  std::vector<double>  & align,
+  double optimalAlignment_gpu(const  std::vector<double>  & align,
                           const  std::vector<double>  & displace,
                           const std::vector<Vector> & positions,
                           const std::vector<Vector> & reference,
                           std::vector<Vector>  & DDistDPos, bool squared=false)const;
+  template <bool safe,bool alEqDis>
+  double optimalAlignment_cpu(const  std::vector<double>  & align,
+                          const  std::vector<double>  & displace,
+                          const std::vector<Vector> & positions,
+                          const std::vector<Vector> & reference,
+                          std::vector<Vector>  & DDistDPos, bool squared=false)const;
+  template <bool safe,bool alEqDis>
+  double optimalAlignment(const  std::vector<double>  & align,
+                          const  std::vector<double>  & displace,
+                          const std::vector<Vector> & positions,
+                          const std::vector<Vector> & reference,
+                          std::vector<Vector>  & DDistDPos, bool squared=false, bool gpu=false)const;
 
   template <bool safe, bool alEqDis>
   double optimalAlignmentWithCloseStructure(const  std::vector<double>  & align,
@@ -268,6 +287,7 @@ private:
   bool hasDistance;  // distance is already calculated
   bool isInitialized;
   bool safe;
+  bool gpu;          // use arrayfire GPU
 
   // this need to be copied and they are small, should not affect the performance
   Vector creference;
@@ -310,16 +330,16 @@ public:
   /// note: this aligns the reference onto the positions
   ///
   /// this method assumes that the centers are already calculated and subtracted
-  RMSDCoreData(const std::vector<double> &a,const std::vector<double> &d,const std::vector<Vector> &p, const std::vector<Vector> &r, Vector &cp, Vector &cr ):
+  RMSDCoreData(const std::vector<double> &a,const std::vector<double> &d,const std::vector<Vector> &p, const std::vector<Vector> &r, Vector &cp, Vector &cr, bool gpu ):
     alEqDis(false),distanceIsMSD(false),hasDistance(false),isInitialized(false),safe(false),
     creference(cr),creference_is_calculated(true),creference_is_removed(true),
-    cpositions(cp),cpositions_is_calculated(true),cpositions_is_removed(true),retrieve_only_rotation(false),positions(p),reference(r),align(a),displace(d),dist(0.0),rr00(0.0),rr11(0.0) {};
+    cpositions(cp),cpositions_is_calculated(true),cpositions_is_removed(true),retrieve_only_rotation(false),positions(p),reference(r),align(a),displace(d),dist(0.0),rr00(0.0),rr11(0.0),gpu(false) {};
 
   // this constructor does not assume that the positions and reference have the center subtracted
-  RMSDCoreData(const std::vector<double> &a,const std::vector<double> &d,const std::vector<Vector> &p, const std::vector<Vector> &r):
+  RMSDCoreData(const std::vector<double> &a,const std::vector<double> &d,const std::vector<Vector> &p, const std::vector<Vector> &r, bool gpu):
     alEqDis(false),distanceIsMSD(false),hasDistance(false),isInitialized(false),safe(false),
     creference_is_calculated(false),creference_is_removed(false),
-    cpositions_is_calculated(false),cpositions_is_removed(false),retrieve_only_rotation(false),positions(p),reference(r),align(a),displace(d),dist(0.0),rr00(0.0),rr11(0.0)
+    cpositions_is_calculated(false),cpositions_is_removed(false),retrieve_only_rotation(false),positions(p),reference(r),align(a),displace(d),dist(0.0),rr00(0.0),rr11(0.0),gpu(false)
   {cpositions.zero(); creference.zero();};
 
   // set the center on the fly without subtracting

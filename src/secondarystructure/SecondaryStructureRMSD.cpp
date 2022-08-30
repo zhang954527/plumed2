@@ -236,11 +236,11 @@ void SecondaryStructureRMSD::performTask( const unsigned& task_index, const unsi
   // And now calculate the RMSD
   const Pbc& pbc=getPbc();
   unsigned closest=0;
-  double r = references[0]->calculate( pos, pbc, mypack, false );
+  double r = references[0]->calculate( pos, pbc, mypack, false, false );
   const unsigned rs = references.size();
   for(unsigned i=1; i<rs; ++i) {
     mypack.setValIndex( i+1 );
-    double nr=references[i]->calculate( pos, pbc, mypack, false );
+    double nr=references[i]->calculate( pos, pbc, mypack, false, false );
     if( nr<r ) { closest=i; r=nr; }
   }
 

@@ -35,9 +35,9 @@ class RMSDBase : public SingleDomainRMSD {
   using SingleDomainRMSD::calc;
 public:
   explicit RMSDBase( const ReferenceConfigurationOptions& ro );
-  double calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared ) const override;
-  double calculate( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const ;
-  virtual double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const=0;
+  double calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const override;
+  double calculate( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const ;
+  virtual double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const=0;
 };
 
 }

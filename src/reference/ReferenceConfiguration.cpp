@@ -66,7 +66,7 @@ double ReferenceConfiguration::calculate( const std::vector<Vector>& pos, const 
     ReferenceValuePack& myder, const bool& squared ) const {
   std::vector<double> tmparg( vals.size() );
   for(unsigned i=0; i<vals.size(); ++i) tmparg[i]=vals[i]->get();
-  return calc( pos, pbc, vals, tmparg, myder, squared );
+  return calc( pos, pbc, vals, tmparg, myder, squared, false );
 }
 
 void ReferenceConfiguration::displaceReferenceConfiguration( const double& weight, Direction& dir ) {
@@ -118,10 +118,10 @@ double distance( const Pbc& pbc, const std::vector<Value*> & vals, ReferenceConf
   else nder=ref1->getReferenceArguments().size();
 
   MultiValue myvals( 1, nder ); ReferenceValuePack myder( ref1->getReferenceArguments().size(), ref1->getReferencePositions().size(), myvals );
-  double dist1=ref1->calc( ref2->getReferencePositions(), pbc, vals, ref2->getReferenceArguments(), myder, squared );
+  double dist1=ref1->calc( ref2->getReferencePositions(), pbc, vals, ref2->getReferenceArguments(), myder, squared, false );
 #ifndef NDEBUG
   // Check that A - B = B - A
-  double dist2=ref2->calc( ref1->getReferencePositions(), pbc, vals, ref1->getReferenceArguments(), myder, squared );
+  double dist2=ref2->calc( ref1->getReferencePositions(), pbc, vals, ref1->getReferenceArguments(), myder, squared, false );
   plumed_dbg_assert( fabs(dist1-dist2)<epsilon );
 #endif
   return dist1;

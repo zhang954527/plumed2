@@ -37,7 +37,7 @@ public:
   void read( const PDB& pdb ) override;
   bool pcaIsEnabledForThisReference() override { return true; }
   void setupPCAStorage( ReferenceValuePack& mypack ) override { mypack.switchOnPCAOption(); }
-  double calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& arg, ReferenceValuePack& myder, const bool& squared ) const override;
+  double calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& arg, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const override;
   double calculate( const std::vector<Value*>& vals, ReferenceValuePack& myder, const bool& squared ) const ;
 };
 

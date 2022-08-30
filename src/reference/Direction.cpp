@@ -59,7 +59,7 @@ void Direction::zeroDirection() {
 }
 
 double Direction::calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& args,
-                        ReferenceValuePack& myder, const bool& squared ) const {
+                        ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
   plumed_merror("You should never be calling calc for a direction");
 }
 

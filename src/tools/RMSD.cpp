@@ -31,7 +31,7 @@
 
 namespace PLMD {
 
-RMSD::RMSD() : alignmentMethod(SIMPLE),reference_center_is_calculated(false),reference_center_is_removed(false),positions_center_is_calculated(false),positions_center_is_removed(false) {}
+RMSD::RMSD() : alignmentMethod(SIMPLE),reference_center_is_calculated(false),reference_center_is_removed(false),positions_center_is_calculated(false),positions_center_is_removed(false),gpu(false) {}
 
 ///
 /// general method to set all the rmsd property at once by using a pdb where occupancy column sets the weights for the atoms involved in the
@@ -48,6 +48,26 @@ void RMSD::set(const std::vector<double> & align, const std::vector<double> & di
   setAlign(align, normalize_weights, remove_center); // this recalculates the com with weights. If remove_center=false then it restore the center back
   setDisplace(displace, normalize_weights);  // this is does not affect any calculation of the weights
   setType(mytype);
+  
+  const unsigned n=reference.size();
+
+  bool gpu = true;
+  if (gpu) {
+    std::vector<double> reference_host;
+    reference_host.resize(3*n);
+    for (unsigned iat=0; iat<n; iat++) {
+      reference_host[3*iat]   = reference[iat][0];
+      reference_host[3*iat+1] = reference[iat][1];
+      reference_host[3*iat+2] = reference[iat][2];
+    }
+    //set GPU device no.
+    af::setDevice(2);
+    // 3,n,1,1
+    reference_device = af::array(3, n, &reference_host.front());
+    // 1,n,1,1
+    align_device = af::array(1, n, &align.front());
+    displace_device = af::array(1, n, &displace.front());
+  }
 
 }
 
@@ -426,11 +446,346 @@ double RMSD::simpleAlignment(const  std::vector<double>  & align,
 // notice that in the current implementation the safe argument only makes sense for
 // align==displace
 template <bool safe,bool alEqDis>
-double RMSD::optimalAlignment(const  std::vector<double>  & align,
+double RMSD::optimalAlignment_gpu(const  std::vector<double>  & align,
                               const  std::vector<double>  & displace,
                               const std::vector<Vector> & positions,
                               const std::vector<Vector> & reference,
-                              std::vector<Vector>  & derivatives, bool squared)const {
+                              std::vector<Vector>  & derivatives, bool squared) const {
+  af::array positions_device;
+  af::array cpositions_device;
+  af::array derivatives_device;
+  af::array ddist_drotation_device;
+  af::array ddist_dcpositions_device;
+  af::array ddist_drr01;
+  af::array rr01_device;
+  af::array rotation_device;
+  af::array d_device;
+  af::array ddist_drr01_device;
+  
+  const unsigned n=reference.size();
+// This is the trace of positions*positions + reference*reference
+  double rr00(0);
+  double rr11(0);
+// This is positions*reference
+  Tensor rr01;
+
+  derivatives.resize(n);
+
+  Vector cpositions;
+
+  std::vector<double> positions_host;
+  positions_host.resize(3*n);
+
+  #pragma omp parallel for num_threads(OpenMP::getNumThreads())
+  for (unsigned iat=0; iat<n; iat++) {
+    positions_host[3*iat]   = positions[iat][0];   // .d[0]是私有变量需要调用[]访问
+    positions_host[3*iat+1] = positions[iat][1];
+    positions_host[3*iat+2] = positions[iat][2];
+  }
+
+  // 3,n,1,1
+  positions_device = af::array(3, n, &positions_host.front());
+
+  // 3,1,1,1
+  cpositions_device = af::sum((positions_device * af::tile(align_device,3,1)).T()).T();
+  // af_print(cpositions_device);
+
+// // first expensive loop: compute centers
+//   for(unsigned iat=0; iat<n; iat++) {
+//     double w=align[iat];
+//     cpositions+=positions[iat]*w;
+//   }
+
+// // second expensive loop: compute second moments wrt centers
+//   for(unsigned iat=0; iat<n; iat++) {
+//     double w=align[iat];
+//     rr00+=dotProduct(positions[iat]-cpositions,positions[iat]-cpositions)*w;
+//     rr11+=dotProduct(reference[iat],reference[iat])*w;
+//     rr01+=Tensor(positions[iat]-cpositions,reference[iat])*w;
+//   }
+
+  rr00 = af::sum<double>(af::sum((positions_device - af::tile(cpositions_device,1,n))*(positions_device - af::tile(cpositions_device,1,n)))*align_device);
+  rr11 = af::sum<double>(af::sum(reference_device*reference_device)*align_device);
+  // 3,3,1,1 -> 9,1,1,1
+  rr01_device = af::flat( af::matmul((positions_device - af::tile(cpositions_device,1,n))*af::tile(align_device,3,1),reference_device.T()) );
+  // af_print(rr01_device);
+
+  double * rr01_host = rr01_device.host<double>();
+
+  rr01[0][0] = rr01_host[0];
+  rr01[1][0] = rr01_host[1];
+  rr01[2][0] = rr01_host[2];
+  rr01[0][1] = rr01_host[3];
+  rr01[1][1] = rr01_host[4];
+  rr01[2][1] = rr01_host[5];
+  rr01[0][2] = rr01_host[6];
+  rr01[1][2] = rr01_host[7];
+  rr01[2][2] = rr01_host[8];
+
+  delete[] rr01_host;
+
+
+
+
+  // double * cpositions_host = cpositions_device.host<double>();
+
+  // cpositions[0] = cpositions_host[0];
+  // cpositions[1] = cpositions_host[1];
+  // cpositions[2] = cpositions_host[2];
+
+  // delete[] cpositions_host;
+
+
+
+
+  Tensor4d m;
+
+  m[0][0]=2.0*(-rr01[0][0]-rr01[1][1]-rr01[2][2]);
+  m[1][1]=2.0*(-rr01[0][0]+rr01[1][1]+rr01[2][2]);
+  m[2][2]=2.0*(+rr01[0][0]-rr01[1][1]+rr01[2][2]);
+  m[3][3]=2.0*(+rr01[0][0]+rr01[1][1]-rr01[2][2]);
+  m[0][1]=2.0*(-rr01[1][2]+rr01[2][1]);
+  m[0][2]=2.0*(+rr01[0][2]-rr01[2][0]);
+  m[0][3]=2.0*(-rr01[0][1]+rr01[1][0]);
+  m[1][2]=2.0*(-rr01[0][1]-rr01[1][0]);
+  m[1][3]=2.0*(-rr01[0][2]-rr01[2][0]);
+  m[2][3]=2.0*(-rr01[1][2]-rr01[2][1]);
+  m[1][0] = m[0][1];
+  m[2][0] = m[0][2];
+  m[2][1] = m[1][2];
+  m[3][0] = m[0][3];
+  m[3][1] = m[1][3];
+  m[3][2] = m[2][3];
+
+  Tensor dm_drr01[4][4];
+  if(!alEqDis) {
+    dm_drr01[0][0] = 2.0*Tensor(-1.0, 0.0, 0.0,  0.0,-1.0, 0.0,  0.0, 0.0,-1.0);
+    dm_drr01[1][1] = 2.0*Tensor(-1.0, 0.0, 0.0,  0.0,+1.0, 0.0,  0.0, 0.0,+1.0);
+    dm_drr01[2][2] = 2.0*Tensor(+1.0, 0.0, 0.0,  0.0,-1.0, 0.0,  0.0, 0.0,+1.0);
+    dm_drr01[3][3] = 2.0*Tensor(+1.0, 0.0, 0.0,  0.0,+1.0, 0.0,  0.0, 0.0,-1.0);
+    dm_drr01[0][1] = 2.0*Tensor( 0.0, 0.0, 0.0,  0.0, 0.0,-1.0,  0.0,+1.0, 0.0);
+    dm_drr01[0][2] = 2.0*Tensor( 0.0, 0.0,+1.0,  0.0, 0.0, 0.0, -1.0, 0.0, 0.0);
+    dm_drr01[0][3] = 2.0*Tensor( 0.0,-1.0, 0.0, +1.0, 0.0, 0.0,  0.0, 0.0, 0.0);
+    dm_drr01[1][2] = 2.0*Tensor( 0.0,-1.0, 0.0, -1.0, 0.0, 0.0,  0.0, 0.0, 0.0);
+    dm_drr01[1][3] = 2.0*Tensor( 0.0, 0.0,-1.0,  0.0, 0.0, 0.0, -1.0, 0.0, 0.0);
+    dm_drr01[2][3] = 2.0*Tensor( 0.0, 0.0, 0.0,  0.0, 0.0,-1.0,  0.0,-1.0, 0.0);
+    dm_drr01[1][0] = dm_drr01[0][1];
+    dm_drr01[2][0] = dm_drr01[0][2];
+    dm_drr01[2][1] = dm_drr01[1][2];
+    dm_drr01[3][0] = dm_drr01[0][3];
+    dm_drr01[3][1] = dm_drr01[1][3];
+    dm_drr01[3][2] = dm_drr01[2][3];
+  }
+
+  double dist=0.0;
+  Vector4d q;
+
+  Tensor dq_drr01[4];
+  if(!alEqDis) {
+    Vector4d eigenvals;
+    Tensor4d eigenvecs;
+    diagMatSym(m, eigenvals, eigenvecs );
+    dist=eigenvals[0]+rr00+rr11;
+    q=Vector4d(eigenvecs[0][0],eigenvecs[0][1],eigenvecs[0][2],eigenvecs[0][3]);
+    double dq_dm[4][4][4];
+    for(unsigned i=0; i<4; i++) for(unsigned j=0; j<4; j++) for(unsigned k=0; k<4; k++) {
+          double tmp=0.0;
+// perturbation theory for matrix m
+          for(unsigned l=1; l<4; l++) tmp+=eigenvecs[l][j]*eigenvecs[l][i]/(eigenvals[0]-eigenvals[l])*eigenvecs[0][k];
+          dq_dm[i][j][k]=tmp;
+        }
+// propagation to _drr01
+    for(unsigned i=0; i<4; i++) {
+      Tensor tmp;
+      for(unsigned j=0; j<4; j++) for(unsigned k=0; k<4; k++) {
+          tmp+=dq_dm[i][j][k]*dm_drr01[j][k];
+        }
+      dq_drr01[i]=tmp;
+    }
+  } else {
+    VectorGeneric<1> eigenvals;
+    TensorGeneric<1,4> eigenvecs;
+    diagMatSym(m, eigenvals, eigenvecs );
+    dist=eigenvals[0]+rr00+rr11;
+    q=Vector4d(eigenvecs[0][0],eigenvecs[0][1],eigenvecs[0][2],eigenvecs[0][3]);
+  }
+
+
+// This is the rotation matrix that brings reference to positions
+// i.e. matmul(rotation,reference[iat])+shift is fitted to positions[iat]
+
+  Tensor rotation;
+  rotation[0][0]=q[0]*q[0]+q[1]*q[1]-q[2]*q[2]-q[3]*q[3];
+  rotation[1][1]=q[0]*q[0]-q[1]*q[1]+q[2]*q[2]-q[3]*q[3];
+  rotation[2][2]=q[0]*q[0]-q[1]*q[1]-q[2]*q[2]+q[3]*q[3];
+  rotation[0][1]=2*(+q[0]*q[3]+q[1]*q[2]);
+  rotation[0][2]=2*(-q[0]*q[2]+q[1]*q[3]);
+  rotation[1][2]=2*(+q[0]*q[1]+q[2]*q[3]);
+  rotation[1][0]=2*(-q[0]*q[3]+q[1]*q[2]);
+  rotation[2][0]=2*(+q[0]*q[2]+q[1]*q[3]);
+  rotation[2][1]=2*(-q[0]*q[1]+q[2]*q[3]);
+
+
+  std::array<std::array<Tensor,3>,3> drotation_drr01;
+  if(!alEqDis) {
+    drotation_drr01[0][0]=2*q[0]*dq_drr01[0]+2*q[1]*dq_drr01[1]-2*q[2]*dq_drr01[2]-2*q[3]*dq_drr01[3];
+    drotation_drr01[1][1]=2*q[0]*dq_drr01[0]-2*q[1]*dq_drr01[1]+2*q[2]*dq_drr01[2]-2*q[3]*dq_drr01[3];
+    drotation_drr01[2][2]=2*q[0]*dq_drr01[0]-2*q[1]*dq_drr01[1]-2*q[2]*dq_drr01[2]+2*q[3]*dq_drr01[3];
+    drotation_drr01[0][1]=2*(+(q[0]*dq_drr01[3]+dq_drr01[0]*q[3])+(q[1]*dq_drr01[2]+dq_drr01[1]*q[2]));
+    drotation_drr01[0][2]=2*(-(q[0]*dq_drr01[2]+dq_drr01[0]*q[2])+(q[1]*dq_drr01[3]+dq_drr01[1]*q[3]));
+    drotation_drr01[1][2]=2*(+(q[0]*dq_drr01[1]+dq_drr01[0]*q[1])+(q[2]*dq_drr01[3]+dq_drr01[2]*q[3]));
+    drotation_drr01[1][0]=2*(-(q[0]*dq_drr01[3]+dq_drr01[0]*q[3])+(q[1]*dq_drr01[2]+dq_drr01[1]*q[2]));
+    drotation_drr01[2][0]=2*(+(q[0]*dq_drr01[2]+dq_drr01[0]*q[2])+(q[1]*dq_drr01[3]+dq_drr01[1]*q[3]));
+    drotation_drr01[2][1]=2*(-(q[0]*dq_drr01[1]+dq_drr01[0]*q[1])+(q[2]*dq_drr01[3]+dq_drr01[2]*q[3]));
+  }
+
+  double prefactor=2.0;
+
+  if(!squared && alEqDis) prefactor*=0.5/std::sqrt(dist);
+
+// if "safe", recompute dist here to a better accuracy
+  if(safe || !alEqDis) dist=0.0;
+
+// If safe is set to "false", MSD is taken from the eigenvalue of the M matrix
+// If safe is set to "true", MSD is recomputed from the rotational matrix
+// For some reason, this last approach leads to less numerical noise but adds an overhead
+
+  Tensor ddist_drotation;
+  Vector ddist_dcpositions;
+
+  // GPU
+  std::vector<double> rotation_host;
+  rotation_host.resize(9);
+  rotation_host[0] = rotation[0][0];
+  rotation_host[1] = rotation[1][0];
+  rotation_host[2] = rotation[2][0];
+  rotation_host[3] = rotation[0][1];
+  rotation_host[4] = rotation[1][1];
+  rotation_host[5] = rotation[2][1];
+  rotation_host[6] = rotation[0][2];
+  rotation_host[7] = rotation[1][2];
+  rotation_host[8] = rotation[2][2];
+  // 3,3,1,1
+  rotation_device = af::array(3, 3, &rotation_host.front());
+// third expensive loop: derivatives
+  // 3,n,1,1
+  d_device = positions_device - af::tile(cpositions_device,1,n) - matmul(rotation_device, reference_device);
+  if(alEqDis) {
+// there is no need for derivatives of rotation and shift here as it is by construction zero
+// (similar to Hellman-Feynman forces)
+    // 3,n,1,1
+    derivatives_device = prefactor * d_device * af::tile(align_device,3,1);
+    // af_print(d_device(af::span,0));
+    // af_print(derivatives_device(af::span,0),10);
+    if (safe) dist += af::sum<double>(align_device * af::sum(d_device*d_device));
+  } else {
+// the case for align != displace is different, sob:
+    dist += af::sum<double>(displace_device * af::sum(d_device*d_device));
+// these are the derivatives assuming the roto-translation as frozen
+    // 3,n,1,1
+    derivatives_device = 2 * af::tile(displace_device,3,1) * d_device;
+// here I accumulate derivatives wrt rotation matrix ..
+    // 3,3,1,1
+    ddist_drotation_device = af::matmul(-2 * af::tile(displace_device,3,1) * d_device, reference_device.T());
+// .. and cpositions
+    // 3,1,1,1
+    ddist_dcpositions_device = af::sum((-2 * af::tile(displace_device,3,1) * d_device).T()).T();
+  }
+  // af_print(d_device);
+  //af_print(derivatives_device);
+  //af_print(ddist_drotation_device);
+  //af_print(ddist_dcpositions_device);
+
+
+
+// // third expensive loop: derivatives
+//   for(unsigned iat=0; iat<n; iat++) {
+//     Vector d(positions[iat]-cpositions - matmul(rotation,reference[iat]));
+//     if(alEqDis) {
+// // there is no need for derivatives of rotation and shift here as it is by construction zero
+// // (similar to Hellman-Feynman forces)
+//       derivatives[iat]= prefactor*align[iat]*d;
+//       if(safe) dist+=align[iat]*modulo2(d);
+//     } else {
+// // the case for align != displace is different, sob:
+//       dist+=displace[iat]*modulo2(d);
+// // these are the derivatives assuming the roto-translation as frozen
+//       derivatives[iat]=2*displace[iat]*d;
+// // here I accumulate derivatives wrt rotation matrix ..
+//       ddist_drotation+=-2*displace[iat]*extProduct(d,reference[iat]);
+// // .. and cpositions
+//       ddist_dcpositions+=-2*displace[iat]*d;
+//     }
+//   }
+
+  if(!alEqDis) {
+    Tensor ddist_drr01;
+    double * ddist_drotation_host = af::flat(ddist_drotation_device).host<double>();
+    ddist_drotation[0][0] = ddist_drotation_host[0];
+    ddist_drotation[1][0] = ddist_drotation_host[1];
+    ddist_drotation[2][0] = ddist_drotation_host[2];
+    ddist_drotation[0][1] = ddist_drotation_host[3];
+    ddist_drotation[1][1] = ddist_drotation_host[4];
+    ddist_drotation[2][1] = ddist_drotation_host[5];
+    ddist_drotation[0][2] = ddist_drotation_host[6];
+    ddist_drotation[1][2] = ddist_drotation_host[7];
+    ddist_drotation[2][2] = ddist_drotation_host[8];
+    for(unsigned i=0; i<3; i++) for(unsigned j=0; j<3; j++) ddist_drr01+=ddist_drotation[i][j]*drotation_drr01[i][j];  //【ddist_drr01】
+ 
+    std::vector<double> ddist_drr01_host;
+    ddist_drr01_host.resize(9);
+    ddist_drr01_host[0] = ddist_drr01[0][0];
+    ddist_drr01_host[1] = ddist_drr01[1][0];
+    ddist_drr01_host[2] = ddist_drr01[2][0];
+    ddist_drr01_host[3] = ddist_drr01[0][1];
+    ddist_drr01_host[4] = ddist_drr01[1][1];
+    ddist_drr01_host[5] = ddist_drr01[2][1];
+    ddist_drr01_host[6] = ddist_drr01[0][2];
+    ddist_drr01_host[7] = ddist_drr01[1][2];
+    ddist_drr01_host[8] = ddist_drr01[2][2];
+    // 3,3,1,1
+    ddist_drr01_device = af::array(3, 3, &ddist_drr01_host.front());
+    // 3,n,1,1 + 3,n,1,1
+    derivatives_device += af::matmul(ddist_drr01_device, reference_device)*af::tile(align_device,3,1);
+    // 3,n,1,1 + 3,n,1,1
+    derivatives_device += af::tile(ddist_dcpositions_device,1,n)*af::tile(align_device,3,1);
+//     for(unsigned iat=0; iat<n; iat++) {
+// // this is propagating to positions.
+// // I am implicitly using the derivative of rr01 wrt positions here
+//       derivatives[iat]+=matmul(ddist_drr01,reference[iat])*align[iat];
+//       derivatives[iat]+=ddist_dcpositions*align[iat];
+//     }
+  }
+  //af_print(derivatives_device);
+
+
+  if(!squared) {
+    dist=std::sqrt(dist);
+    if(!alEqDis) {
+      double xx=0.5/dist;
+      derivatives_device *= xx;
+      // for(unsigned iat=0; iat<n; iat++) derivatives[iat]*=xx;
+    }
+  }
+  // af_print(derivatives_device(af::span,5));
+
+  double * derivatives_host = derivatives_device.host<double>();
+  unsigned k = 0;
+  // #pragma omp parallel for num_threads(OpenMP::getNumThreads())
+  for (unsigned i=0; i++; i<n) {
+    for (unsigned j=0; j++; j<3) {
+      derivatives[j][i] = derivatives_host[k++];
+    }
+  } 
+
+  return dist;
+}
+template <bool safe,bool alEqDis>
+double RMSD::optimalAlignment_cpu(const  std::vector<double>  & align,
+                              const  std::vector<double>  & displace,
+                              const std::vector<Vector> & positions,
+                              const std::vector<Vector> & reference,
+                              std::vector<Vector>  & derivatives, bool squared) const {
   const unsigned n=reference.size();
 // This is the trace of positions*positions + reference*reference
   double rr00(0);
@@ -611,6 +966,15 @@ double RMSD::optimalAlignment(const  std::vector<double>  & align,
 
   return dist;
 }
+template <bool safe,bool alEqDis>
+double RMSD::optimalAlignment(const  std::vector<double>  & align,
+                              const  std::vector<double>  & displace,
+                              const std::vector<Vector> & positions,
+                              const std::vector<Vector> & reference,
+                              std::vector<Vector>  & derivatives, bool squared, bool gpu)const {
+  if (gpu) return optimalAlignment_gpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
+  else return optimalAlignment_cpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
+}
 #else
 /// note that this method is intended to be repeatedly invoked
 /// when the reference does already have the center subtracted
@@ -623,7 +987,7 @@ double RMSD::optimalAlignment(const  std::vector<double>  & align,
                               std::vector<Vector>  & derivatives,
                               bool squared) const {
   //std::cerr<<"setting up the core data \n";
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
 
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
@@ -653,7 +1017,7 @@ double RMSD::optimalAlignment_DDistDRef(const  std::vector<double>  & align,
                                         bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
@@ -684,7 +1048,7 @@ double RMSD::optimalAlignment_SOMA(const  std::vector<double>  & align,
                                    bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
@@ -718,7 +1082,7 @@ double RMSD::optimalAlignment_DDistDRef_Rot_DRotDPos(const  std::vector<double> 
     bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
@@ -756,7 +1120,7 @@ double RMSD::optimalAlignment_DDistDRef_Rot_DRotDPos_DRotDRef(const  std::vector
     bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
@@ -792,7 +1156,7 @@ double RMSD::optimalAlignment_Rot_DRotDRr01(const  std::vector<double>  & align,
     bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
   if(positions_center_is_calculated) {cd.setPositionsCenter(positions_center);}
@@ -823,7 +1187,7 @@ double RMSD::optimalAlignment_Rot(const  std::vector<double>  & align,
                                   bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
   if(positions_center_is_calculated) {cd.setPositionsCenter(positions_center);}
@@ -856,7 +1220,7 @@ double RMSD::optimalAlignmentWithCloseStructure(const  std::vector<double>  & al
     bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
   if(positions_center_is_calculated) {cd.setPositionsCenter(positions_center);}
@@ -890,7 +1254,7 @@ double RMSD::optimalAlignment_PCA(const  std::vector<double>  & align,
                                   bool squared) const {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
   if(positions_center_is_calculated) {cd.setPositionsCenter(positions_center);}
@@ -932,7 +1296,7 @@ double RMSD::optimalAlignment_Fit(const  std::vector<double>  & align,
                                   bool squared) {
   //initialize the data into the structure
   // typically the positions do not have the com neither calculated nor subtracted. This layer takes care of this business
-  RMSDCoreData cd(align,displace,positions,reference);
+  RMSDCoreData cd(align,displace,positions,reference,gpu);
   // transfer the settings for the center to let the CoreCalc deal with it
   cd.setPositionsCenterIsRemoved(positions_center_is_removed);
   if(positions_center_is_calculated) {cd.setPositionsCenter(positions_center);}
@@ -1013,12 +1377,12 @@ void RMSDCoreData::doCoreCalc_gpu(bool safe,bool alEqDis,bool only_rotation) {
     // 1,n,1,1
     align_device = af::array(1, n, &align_host.front());
 
-    rr00 = af::sum<float>(af::sum((positions_device - af::tile(cp_device,1,n))*(positions_device - af::tile(cp_device,1,n)))*align_device);
-    rr11 = af::sum<float>(af::sum((reference_device - af::tile(cr_device,1,n))*(reference_device - af::tile(cr_device,1,n)))*align_device);
-    // 9,1,1,1
-    rr01_device = af::flat( af::matmul((positions_device - af::tile(cp_device,1,n))*align_device,(reference_device - af::tile(cr_device,1,n)).T()) );
-  
-    float * rr01_host = rr01_device.host<float>();
+    rr00 = af::sum<double>(af::sum((positions_device - af::tile(cp_device,1,n))*(positions_device - af::tile(cp_device,1,n)))*align_device);
+    rr11 = af::sum<double>(af::sum((reference_device - af::tile(cr_device,1,n))*(reference_device - af::tile(cr_device,1,n)))*align_device);
+    // 3,3,1,1 -> 9,1,1,1
+    rr01_device = af::flat( af::matmul((positions_device - af::tile(cp_device,1,n))*af::tile(align_device,3,1),(reference_device - af::tile(cr_device,1,n)).T()) );
+
+    double * rr01_host = rr01_device.host<double>();
 
     rr01[0][0] = rr01_host[0];
     rr01[1][0] = rr01_host[1];
@@ -1137,7 +1501,7 @@ void RMSDCoreData::doCoreCalc_gpu(bool safe,bool alEqDis,bool only_rotation) {
   if(!alEqDis)ddist_drotation.zero();
 
   // GPU
-  std::vector<float> rotation_host;
+  std::vector<double> rotation_host;
   rotation_host.resize(9);
   rotation_host[0] = rotation[0][0];
   rotation_host[1] = rotation[1][0];
@@ -1150,18 +1514,15 @@ void RMSDCoreData::doCoreCalc_gpu(bool safe,bool alEqDis,bool only_rotation) {
   rotation_host[8] = rotation[2][2];
   // 3,3,1,1
   rotation_device = af::array(3, 3, &rotation_host.front());
-  // af_print(rotation_device);
   // 3,n,1,1
-  d_device = positions_device - af::tile(cp_device,1,n) - matmul(rotation_device, reference_device - af::tile(cr_device,1,n));
-  // af::array d_device = positions_device - cp_device - matmul(rotation_device, reference_device - cr_device); // 【d_device】
-  // af_print(d_device(af::span, 3));
+  d_device = positions_device - af::tile(cp_device,1,n) - af::matmul(rotation_device, reference_device - af::tile(cr_device,1,n));
   
 
   // ddist_drotation if needed
 
   // GPU
   if(!alEqDis or !only_rotation) {
-    std::vector<float> displace_host;
+    std::vector<double> displace_host;
     displace_host.resize(n);
     #pragma omp parallel for num_threads(OpenMP::getNumThreads())
     for (unsigned iat=0; iat<n; iat++) {
@@ -1169,11 +1530,10 @@ void RMSDCoreData::doCoreCalc_gpu(bool safe,bool alEqDis,bool only_rotation) {
     }
     // 1,n,1,1
     displace_device = af::array(1, n, &displace_host.front());
-    // 3,3,1,1
-    ddist_drotation_device = af::flat( af::matmul(-2 * displace_device * d_device, (reference_device - af::tile(cr_device,1,n)).T()) );
-    //af_print(ddist_drotation_device);
+    // 3,3,1,1 -> 9,1,1,1
+    ddist_drotation_device = af::flat( af::matmul(-2 * af::tile(displace_device,3,1) * d_device, (reference_device - af::tile(cr_device,1,n)).T()) );
     
-    float * ddist_drotation_host = ddist_drotation_device.host<float>();
+    double * ddist_drotation_host = ddist_drotation_device.host<double>();
 
     ddist_drotation[0][0] = ddist_drotation_host[0];
     ddist_drotation[1][0] = ddist_drotation_host[1];
@@ -1343,6 +1703,8 @@ void RMSDCoreData::doCoreCalc_cpu(bool safe,bool alEqDis, bool only_rotation) {
   this->safe=safe;
   isInitialized=true;
 
+  std::cout << "Hello!" << std::endl;
+
 }
 /// This calculates the elements needed by the quaternion to calculate everything that is needed
 /// additional calls retrieve different components
@@ -1350,7 +1712,7 @@ void RMSDCoreData::doCoreCalc_cpu(bool safe,bool alEqDis, bool only_rotation) {
 /// but automatically should properly account for non removed components: if not removed then it
 /// removes prior to calculation of the alignment
 void RMSDCoreData::doCoreCalc(bool safe, bool alEqDis, bool only_rotation) {
-  bool gpu = false;
+  gpu = true;
   if (gpu) doCoreCalc_gpu(safe, alEqDis, only_rotation);
   else doCoreCalc_cpu(safe, alEqDis, only_rotation);
 }
@@ -1368,9 +1730,9 @@ double RMSDCoreData::getDistance_gpu(bool squared) {
 
   // GPU
   if(alEqDis) {
-    if(safe) localDist = af::sum<float>(align_device * af::sum(d_device*d_device));
+    if(safe) localDist = af::sum<double>(align_device * af::sum(d_device*d_device));
   } else {
-    localDist = af::sum<float>(displace_device * af::sum(d_device*d_device));
+    localDist = af::sum<double>(displace_device * af::sum(d_device*d_device));
   }
 
   if(!squared) {
@@ -1412,7 +1774,7 @@ double RMSDCoreData::getDistance_cpu(bool squared) {
 }
 /// just retrieve the distance already calculated
 double RMSDCoreData::getDistance(bool squared) {
-  bool gpu = false;
+  gpu = true;
   if (gpu) return getDistance_gpu(squared);
   else return getDistance_cpu(squared);
 }
@@ -1724,22 +2086,22 @@ template double RMSD::optimalAlignment<true,true>(const  std::vector<double>  & 
     const  std::vector<double>  & displace,
     const std::vector<Vector> & positions,
     const std::vector<Vector> & reference,
-    std::vector<Vector>  & derivatives, bool squared)const;
+    std::vector<Vector>  & derivatives, bool squared, bool gpu)const;
 template double RMSD::optimalAlignment<true,false>(const  std::vector<double>  & align,
     const  std::vector<double>  & displace,
     const std::vector<Vector> & positions,
     const std::vector<Vector> & reference,
-    std::vector<Vector>  & derivatives, bool squared)const;
+    std::vector<Vector>  & derivatives, bool squared, bool gpu)const;
 template double RMSD::optimalAlignment<false,true>(const  std::vector<double>  & align,
     const  std::vector<double>  & displace,
     const std::vector<Vector> & positions,
     const std::vector<Vector> & reference,
-    std::vector<Vector>  & derivatives, bool squared)const;
+    std::vector<Vector>  & derivatives, bool squared, bool gpu)const;
 template double RMSD::optimalAlignment<false,false>(const  std::vector<double>  & align,
     const  std::vector<double>  & displace,
     const std::vector<Vector> & positions,
     const std::vector<Vector> & reference,
-    std::vector<Vector>  & derivatives, bool squared)const;
+    std::vector<Vector>  & derivatives, bool squared, bool gpu)const;
 
 
 

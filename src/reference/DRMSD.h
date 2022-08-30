@@ -47,7 +47,7 @@ public:
   void read( const PDB& ) override;
   virtual void setup_targets();
   void setReferenceAtoms( const std::vector<Vector>& conf, const std::vector<double>& align_in, const std::vector<double>& displace_in ) override;
-  double calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared ) const override;
+  double calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const override;
 };
 
 }

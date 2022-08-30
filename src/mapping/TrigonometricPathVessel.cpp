@@ -137,13 +137,13 @@ void TrigonometricPathVessel::finish( const std::vector<double>& buffer ) {
   if( iclose3<0 || iclose3>=mymap->getFullNumberOfTasks() ) {
     ReferenceConfiguration* conf2=mymap->getReferenceConfiguration( iclose1 );
     v2v2=(mymap->getReferenceConfiguration( iclose2 ))->calc( conf2->getReferencePositions(), mymap->getPbc(), mymap->getArguments(),
-         conf2->getReferenceArguments(), mypack2, true );
+         conf2->getReferenceArguments(), mypack2, true, false );
     (mymap->getReferenceConfiguration( iclose2 ))->extractDisplacementVector( conf2->getReferencePositions(), mymap->getArguments(),
         conf2->getReferenceArguments(), false, projdir );
   } else {
     ReferenceConfiguration* conf2=mymap->getReferenceConfiguration( iclose3 );
     v2v2=(mymap->getReferenceConfiguration( iclose1 ))->calc( conf2->getReferencePositions(), mymap->getPbc(), mymap->getArguments(),
-         conf2->getReferenceArguments(), mypack2, true );
+         conf2->getReferenceArguments(), mypack2, true, false );
     (mymap->getReferenceConfiguration( iclose1 ))->extractDisplacementVector( conf2->getReferencePositions(), mymap->getArguments(),
         conf2->getReferenceArguments(), false, projdir );
   }
@@ -186,7 +186,7 @@ void TrigonometricPathVessel::finish( const std::vector<double>& buffer ) {
   // Now compute z value
   ReferenceConfiguration* conf2=mymap->getReferenceConfiguration( iclose1 );
   double v4v4=(mymap->getReferenceConfiguration( iclose2 ))->calc( conf2->getReferencePositions(), mymap->getPbc(), mymap->getArguments(),
-              conf2->getReferenceArguments(), mypack2, true );
+              conf2->getReferenceArguments(), mypack2, true, false );
   // Extract vector connecting frames
   (mymap->getReferenceConfiguration( iclose2 ))->extractDisplacementVector( conf2->getReferencePositions(), mymap->getArguments(),
       conf2->getReferenceArguments(), false, projdir );

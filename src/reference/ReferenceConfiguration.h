@@ -106,7 +106,7 @@ public:
   double calculate( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, ReferenceValuePack& myder, const bool& squared=false ) const ;
 /// Calculate the distance from the reference configuration
   virtual double calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& args,
-                       ReferenceValuePack& myder, const bool& squared ) const=0;
+                       ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const=0;
 /// Parse something from the pdb remarks
 /// Copy derivatives from one frame to this frame
   void copyDerivatives( const ReferenceConfiguration* );

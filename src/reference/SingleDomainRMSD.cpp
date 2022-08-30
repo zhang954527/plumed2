@@ -89,14 +89,14 @@ void SingleDomainRMSD::setReferenceAtoms( const std::vector<Vector>& conf, const
   setupRMSDObject();
 }
 
-double SingleDomainRMSD::calculate( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared ) const {
-  return calc( pos, pbc, myder, squared );
+double SingleDomainRMSD::calculate( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
+  return calc( pos, pbc, myder, squared, gpu );
 }
 
 double SingleDomainRMSD::calc( const std::vector<Vector>& pos, const Pbc& pbc, const std::vector<Value*>& vals, const std::vector<double>& arg,
-                               ReferenceValuePack& myder, const bool& squared ) const {
+                               ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
   plumed_dbg_assert( vals.size()==0 && pos.size()==getNumberOfAtoms() && arg.size()==0 );
-  return calc( pos, pbc, myder, squared );
+  return calc( pos, pbc, myder, squared, gpu );
 }
 
 }
