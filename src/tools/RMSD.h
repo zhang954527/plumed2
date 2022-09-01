@@ -82,9 +82,15 @@ class RMSD
   bool positions_center_is_removed;
 // arrayfire GPU for rmsd calculation
   bool gpu;
+  double rr11;
   af::array reference_device;
+  af::array reference_device_trans;
   af::array align_device;
   af::array displace_device;
+
+  mutable std::vector<double> rr01_host;
+  mutable std::vector<double> ddist_drotation_host;
+  mutable std::vector<double> derivatives_host;
 // calculates the center from the position provided
   Vector calculateCenter(const std::vector<Vector> &p,const std::vector<double> &w) {
     plumed_massert(p.size()==w.size(),"mismatch in dimension of position/align arrays while calculating the center");
@@ -136,7 +142,8 @@ public:
   template <bool safe,bool alEqDis>
   double optimalAlignment_gpu(const  std::vector<double>  & align,
                           const  std::vector<double>  & displace,
-                          const std::vector<Vector> & positions,
+                          const std::vector<Vector>& pos,
+                          af::array& pos_device, const std::vector<int> &indexes_device, 
                           const std::vector<Vector> & reference,
                           std::vector<Vector>  & DDistDPos, bool squared=false)const;
   template <bool safe,bool alEqDis>

@@ -229,7 +229,12 @@ void ActionAtomistic::retrieveAtoms() {
   const std::vector<Vector> & p(atoms.positions);
   const std::vector<double> & c(atoms.charges);
   const std::vector<double> & m(atoms.masses);
-  for(unsigned j=0; j<indexes.size(); j++) positions[j]=p[indexes[j].index()];
+  // if (!gpu) {
+    for(unsigned j=0; j<indexes.size(); j++) positions[j]=p[indexes[j].index()];
+  // }
+  // } else {
+  //   printf("retrieveAtoms, use gpu\n");
+  // }
   for(unsigned j=0; j<indexes.size(); j++) charges[j]=c[indexes[j].index()];
   for(unsigned j=0; j<indexes.size(); j++) masses[j]=m[indexes[j].index()];
 }

@@ -25,6 +25,7 @@
 #include <vector>
 #include <string>
 #include "SingleDomainRMSD.h"
+#include <arrayfire.h>
 
 namespace PLMD {
 
@@ -37,7 +38,10 @@ public:
   explicit RMSDBase( const ReferenceConfigurationOptions& ro );
   double calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const override;
   double calculate( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const ;
+  double calculate_gpu(const std::vector<Vector>& pos, af::array& pos_device, const std::vector<int> &indexes_device, ReferenceValuePack& myder, const bool& squared) const ;
   virtual double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const=0;
+  virtual double calc_gpu(const std::vector<Vector>& pos,af::array& pos_device, const std::vector<int> &indexes_device, ReferenceValuePack& myder, const bool& squared) const=0;
+
 };
 
 }

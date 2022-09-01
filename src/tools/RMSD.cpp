@@ -64,9 +64,15 @@ void RMSD::set(const std::vector<double> & align, const std::vector<double> & di
     af::setDevice(2);
     // 3,n,1,1
     reference_device = af::array(3, n, &reference_host.front());
+    reference_device_trans = reference_device.T();
     // 1,n,1,1
     align_device = af::array(1, n, &align.front());
     displace_device = af::array(1, n, &displace.front());
+    rr11 = af::sum<double>(af::sum(reference_device*reference_device)*align_device);
+    
+    derivatives_host.resize(3*n);
+    rr01_host.resize(9);
+    ddist_drotation_host.resize(9);
   }
 
 }
@@ -448,24 +454,30 @@ double RMSD::simpleAlignment(const  std::vector<double>  & align,
 template <bool safe,bool alEqDis>
 double RMSD::optimalAlignment_gpu(const  std::vector<double>  & align,
                               const  std::vector<double>  & displace,
-                              const std::vector<Vector> & positions,
+                              const std::vector<Vector>& positions,
+                              af::array& all_positions_device, const std::vector<int> &indexes_device, 
                               const std::vector<Vector> & reference,
                               std::vector<Vector>  & derivatives, bool squared) const {
+
+
   af::array positions_device;
   af::array cpositions_device;
+  af::array rr01_device;
+  af::array rr01_device_tmp;
+
   af::array derivatives_device;
   af::array ddist_drotation_device;
   af::array ddist_dcpositions_device;
   af::array ddist_drr01;
-  af::array rr01_device;
   af::array rotation_device;
   af::array d_device;
   af::array ddist_drr01_device;
-  
-  const unsigned n=reference.size();
+
+  const unsigned n=indexes_device.size();
+  // printf("RMSD::optimalAlignment_gpu dims = [%lld %lld %d]\n", all_positions_device.dims(0), all_positions_device.dims(1), n); // 4,5
 // This is the trace of positions*positions + reference*reference
   double rr00(0);
-  double rr11(0);
+  // double rr11(0);
 // This is positions*reference
   Tensor rr01;
 
@@ -473,21 +485,35 @@ double RMSD::optimalAlignment_gpu(const  std::vector<double>  & align,
 
   Vector cpositions;
 
-  std::vector<double> positions_host;
-  positions_host.resize(3*n);
+  // std::vector<int> pos_idx;
+  //pos_idx.resize(n);
 
-  #pragma omp parallel for num_threads(OpenMP::getNumThreads())
-  for (unsigned iat=0; iat<n; iat++) {
-    positions_host[3*iat]   = positions[iat][0];   // .d[0]是私有变量需要调用[]访问
-    positions_host[3*iat+1] = positions[iat][1];
-    positions_host[3*iat+2] = positions[iat][2];
-  }
+  // std::vector<double> positions_host;
+  // positions_host.resize(3*n);
 
+  // #pragma omp parallel for num_threads(OpenMP::getNumThreads())
+  // for (unsigned iat=0; iat<n; iat++) {
+  //   positions_host[3*iat]   = positions[iat][0];   // .d[0]是私有变量需要调用[]访问
+  //   positions_host[3*iat+1] = positions[iat][1];
+  //   positions_host[3*iat+2] = positions[iat][2];
+  // }
+
+
+  af::array idx(n, indexes_device.data());
+  // array copy3 = A(idx, span);
   // 3,n,1,1
-  positions_device = af::array(3, n, &positions_host.front());
+
+  positions_device = all_positions_device(af::span, idx);
+  // printf("RMSD::optimalAlignment_gpu positions_device dims = [%lld %lld %d]\n", positions_device.dims(0), positions_device.dims(1), n); // 4,5
+
+  // positions_device = af::array(3, n, &positions_host.front());
+
 
   // 3,1,1,1
   cpositions_device = af::sum((positions_device * af::tile(align_device,3,1)).T()).T();
+  //af_print(cpositions_device);
+  // printf("RMSD::optimalAlignment_gpu cpositions_device dims = [%lld %lld %d]\n", cpositions_device.dims(0), cpositions_device.dims(1), n); // 4,5
+
   // af_print(cpositions_device);
 
 // // first expensive loop: compute centers
@@ -504,13 +530,14 @@ double RMSD::optimalAlignment_gpu(const  std::vector<double>  & align,
 //     rr01+=Tensor(positions[iat]-cpositions,reference[iat])*w;
 //   }
 
-  rr00 = af::sum<double>(af::sum((positions_device - af::tile(cpositions_device,1,n))*(positions_device - af::tile(cpositions_device,1,n)))*align_device);
-  rr11 = af::sum<double>(af::sum(reference_device*reference_device)*align_device);
-  // 3,3,1,1 -> 9,1,1,1
-  rr01_device = af::flat( af::matmul((positions_device - af::tile(cpositions_device,1,n))*af::tile(align_device,3,1),reference_device.T()) );
-  // af_print(rr01_device);
 
-  double * rr01_host = rr01_device.host<double>();
+  rr00 = af::sum<double>(af::sum((positions_device - af::tile(cpositions_device,1,n))*(positions_device - af::tile(cpositions_device,1,n)))*align_device);
+  
+  // 3,3,1,1 -> 9,1,1,1
+  rr01_device = af::flat( af::matmul((positions_device - af::tile(cpositions_device,1,n))*af::tile(align_device,3,1),reference_device_trans) );
+
+
+  rr01_device.host(&rr01_host.front());
 
   rr01[0][0] = rr01_host[0];
   rr01[1][0] = rr01_host[1];
@@ -521,8 +548,6 @@ double RMSD::optimalAlignment_gpu(const  std::vector<double>  & align,
   rr01[0][2] = rr01_host[6];
   rr01[1][2] = rr01_host[7];
   rr01[2][2] = rr01_host[8];
-
-  delete[] rr01_host;
 
 
 
@@ -720,7 +745,8 @@ double RMSD::optimalAlignment_gpu(const  std::vector<double>  & align,
 
   if(!alEqDis) {
     Tensor ddist_drr01;
-    double * ddist_drotation_host = af::flat(ddist_drotation_device).host<double>();
+    ddist_drotation_device = af::flat(ddist_drotation_device);
+    ddist_drotation_device.host(&ddist_drotation_host.front());
     ddist_drotation[0][0] = ddist_drotation_host[0];
     ddist_drotation[1][0] = ddist_drotation_host[1];
     ddist_drotation[2][0] = ddist_drotation_host[2];
@@ -769,17 +795,208 @@ double RMSD::optimalAlignment_gpu(const  std::vector<double>  & align,
   }
   // af_print(derivatives_device(af::span,5));
 
-  double * derivatives_host = derivatives_device.host<double>();
-  unsigned k = 0;
-  // #pragma omp parallel for num_threads(OpenMP::getNumThreads())
-  for (unsigned i=0; i++; i<n) {
-    for (unsigned j=0; j++; j<3) {
-      derivatives[j][i] = derivatives_host[k++];
+
+  derivatives_device = af::flat(derivatives_device);
+  derivatives_device.host(&derivatives_host.front());
+  for (unsigned i=0; i<3; i++) {
+    for (unsigned j=0; j<n; j++) {
+      derivatives[i][j] = derivatives_host[3*j+i];
     }
-  } 
+  }
+  
 
   return dist;
+
+
+/*===================================
+  const unsigned n=reference.size();
+// This is the trace of positions*positions + reference*reference
+  double rr00(0);
+  double rr11(0);
+// This is positions*reference
+  Tensor rr01;
+
+  derivatives.resize(n);
+
+  Vector cpositions;
+
+// first expensive loop: compute centers
+  for(unsigned iat=0; iat<n; iat++) {
+    double w=align[iat];
+    cpositions+=positions[iat]*w;
+  }
+*/
+// second expensive loop: compute second moments wrt centers
+  // for(unsigned iat=0; iat<n; iat++) {
+  //   double w=align[iat];
+  //   // rr00+=dotProduct(positions[iat]-cpositions,positions[iat]-cpositions)*w;
+  //   // rr11+=dotProduct(reference[iat],reference[iat])*w;
+  //   rr01+=Tensor(positions[iat]-cpositions,reference[iat])*w;
+  // }
+
+
+
+
+
+/*
+  Tensor4d m;
+
+  m[0][0]=2.0*(-rr01[0][0]-rr01[1][1]-rr01[2][2]);
+  m[1][1]=2.0*(-rr01[0][0]+rr01[1][1]+rr01[2][2]);
+  m[2][2]=2.0*(+rr01[0][0]-rr01[1][1]+rr01[2][2]);
+  m[3][3]=2.0*(+rr01[0][0]+rr01[1][1]-rr01[2][2]);
+  m[0][1]=2.0*(-rr01[1][2]+rr01[2][1]);
+  m[0][2]=2.0*(+rr01[0][2]-rr01[2][0]);
+  m[0][3]=2.0*(-rr01[0][1]+rr01[1][0]);
+  m[1][2]=2.0*(-rr01[0][1]-rr01[1][0]);
+  m[1][3]=2.0*(-rr01[0][2]-rr01[2][0]);
+  m[2][3]=2.0*(-rr01[1][2]-rr01[2][1]);
+  m[1][0] = m[0][1];
+  m[2][0] = m[0][2];
+  m[2][1] = m[1][2];
+  m[3][0] = m[0][3];
+  m[3][1] = m[1][3];
+  m[3][2] = m[2][3];
+
+
+  Tensor dm_drr01[4][4];
+  if(!alEqDis) {
+    dm_drr01[0][0] = 2.0*Tensor(-1.0, 0.0, 0.0,  0.0,-1.0, 0.0,  0.0, 0.0,-1.0);
+    dm_drr01[1][1] = 2.0*Tensor(-1.0, 0.0, 0.0,  0.0,+1.0, 0.0,  0.0, 0.0,+1.0);
+    dm_drr01[2][2] = 2.0*Tensor(+1.0, 0.0, 0.0,  0.0,-1.0, 0.0,  0.0, 0.0,+1.0);
+    dm_drr01[3][3] = 2.0*Tensor(+1.0, 0.0, 0.0,  0.0,+1.0, 0.0,  0.0, 0.0,-1.0);
+    dm_drr01[0][1] = 2.0*Tensor( 0.0, 0.0, 0.0,  0.0, 0.0,-1.0,  0.0,+1.0, 0.0);
+    dm_drr01[0][2] = 2.0*Tensor( 0.0, 0.0,+1.0,  0.0, 0.0, 0.0, -1.0, 0.0, 0.0);
+    dm_drr01[0][3] = 2.0*Tensor( 0.0,-1.0, 0.0, +1.0, 0.0, 0.0,  0.0, 0.0, 0.0);
+    dm_drr01[1][2] = 2.0*Tensor( 0.0,-1.0, 0.0, -1.0, 0.0, 0.0,  0.0, 0.0, 0.0);
+    dm_drr01[1][3] = 2.0*Tensor( 0.0, 0.0,-1.0,  0.0, 0.0, 0.0, -1.0, 0.0, 0.0);
+    dm_drr01[2][3] = 2.0*Tensor( 0.0, 0.0, 0.0,  0.0, 0.0,-1.0,  0.0,-1.0, 0.0);
+    dm_drr01[1][0] = dm_drr01[0][1];
+    dm_drr01[2][0] = dm_drr01[0][2];
+    dm_drr01[2][1] = dm_drr01[1][2];
+    dm_drr01[3][0] = dm_drr01[0][3];
+    dm_drr01[3][1] = dm_drr01[1][3];
+    dm_drr01[3][2] = dm_drr01[2][3];
+  }
+
+  double dist=0.0;
+  Vector4d q;
+
+  Tensor dq_drr01[4];
+  if(!alEqDis) {
+    Vector4d eigenvals;
+    Tensor4d eigenvecs;
+    diagMatSym(m, eigenvals, eigenvecs );
+    dist=eigenvals[0]+rr00+rr11;
+    q=Vector4d(eigenvecs[0][0],eigenvecs[0][1],eigenvecs[0][2],eigenvecs[0][3]);
+    double dq_dm[4][4][4];
+    for(unsigned i=0; i<4; i++) for(unsigned j=0; j<4; j++) for(unsigned k=0; k<4; k++) {
+          double tmp=0.0;
+// perturbation theory for matrix m
+          for(unsigned l=1; l<4; l++) tmp+=eigenvecs[l][j]*eigenvecs[l][i]/(eigenvals[0]-eigenvals[l])*eigenvecs[0][k];
+          dq_dm[i][j][k]=tmp;
+        }
+// propagation to _drr01
+    for(unsigned i=0; i<4; i++) {
+      Tensor tmp;
+      for(unsigned j=0; j<4; j++) for(unsigned k=0; k<4; k++) {
+          tmp+=dq_dm[i][j][k]*dm_drr01[j][k];
+        }
+      dq_drr01[i]=tmp;
+    }
+  } else {
+    VectorGeneric<1> eigenvals;
+    TensorGeneric<1,4> eigenvecs;
+    diagMatSym(m, eigenvals, eigenvecs );
+    dist=eigenvals[0]+rr00+rr11;
+    q=Vector4d(eigenvecs[0][0],eigenvecs[0][1],eigenvecs[0][2],eigenvecs[0][3]);
+  }
+
+
+// This is the rotation matrix that brings reference to positions
+// i.e. matmul(rotation,reference[iat])+shift is fitted to positions[iat]
+
+  Tensor rotation;
+  rotation[0][0]=q[0]*q[0]+q[1]*q[1]-q[2]*q[2]-q[3]*q[3];
+  rotation[1][1]=q[0]*q[0]-q[1]*q[1]+q[2]*q[2]-q[3]*q[3];
+  rotation[2][2]=q[0]*q[0]-q[1]*q[1]-q[2]*q[2]+q[3]*q[3];
+  rotation[0][1]=2*(+q[0]*q[3]+q[1]*q[2]);
+  rotation[0][2]=2*(-q[0]*q[2]+q[1]*q[3]);
+  rotation[1][2]=2*(+q[0]*q[1]+q[2]*q[3]);
+  rotation[1][0]=2*(-q[0]*q[3]+q[1]*q[2]);
+  rotation[2][0]=2*(+q[0]*q[2]+q[1]*q[3]);
+  rotation[2][1]=2*(-q[0]*q[1]+q[2]*q[3]);
+
+  std::array<std::array<Tensor,3>,3> drotation_drr01;
+  if(!alEqDis) {
+    drotation_drr01[0][0]=2*q[0]*dq_drr01[0]+2*q[1]*dq_drr01[1]-2*q[2]*dq_drr01[2]-2*q[3]*dq_drr01[3];
+    drotation_drr01[1][1]=2*q[0]*dq_drr01[0]-2*q[1]*dq_drr01[1]+2*q[2]*dq_drr01[2]-2*q[3]*dq_drr01[3];
+    drotation_drr01[2][2]=2*q[0]*dq_drr01[0]-2*q[1]*dq_drr01[1]-2*q[2]*dq_drr01[2]+2*q[3]*dq_drr01[3];
+    drotation_drr01[0][1]=2*(+(q[0]*dq_drr01[3]+dq_drr01[0]*q[3])+(q[1]*dq_drr01[2]+dq_drr01[1]*q[2]));
+    drotation_drr01[0][2]=2*(-(q[0]*dq_drr01[2]+dq_drr01[0]*q[2])+(q[1]*dq_drr01[3]+dq_drr01[1]*q[3]));
+    drotation_drr01[1][2]=2*(+(q[0]*dq_drr01[1]+dq_drr01[0]*q[1])+(q[2]*dq_drr01[3]+dq_drr01[2]*q[3]));
+    drotation_drr01[1][0]=2*(-(q[0]*dq_drr01[3]+dq_drr01[0]*q[3])+(q[1]*dq_drr01[2]+dq_drr01[1]*q[2]));
+    drotation_drr01[2][0]=2*(+(q[0]*dq_drr01[2]+dq_drr01[0]*q[2])+(q[1]*dq_drr01[3]+dq_drr01[1]*q[3]));
+    drotation_drr01[2][1]=2*(-(q[0]*dq_drr01[1]+dq_drr01[0]*q[1])+(q[2]*dq_drr01[3]+dq_drr01[2]*q[3]));
+  }
+
+  double prefactor=2.0;
+
+  if(!squared && alEqDis) prefactor*=0.5/std::sqrt(dist);
+
+// if "safe", recompute dist here to a better accuracy
+  if(safe || !alEqDis) dist=0.0;
+
+// If safe is set to "false", MSD is taken from the eigenvalue of the M matrix
+// If safe is set to "true", MSD is recomputed from the rotational matrix
+// For some reason, this last approach leads to less numerical noise but adds an overhead
+
+  Tensor ddist_drotation;
+  Vector ddist_dcpositions;
+
+// third expensive loop: derivatives
+  for(unsigned iat=0; iat<n; iat++) {
+    Vector d(positions[iat]-cpositions - matmul(rotation,reference[iat]));
+    if(alEqDis) {
+// there is no need for derivatives of rotation and shift here as it is by construction zero
+// (similar to Hellman-Feynman forces)
+      derivatives[iat]= prefactor*align[iat]*d;
+      if(safe) dist+=align[iat]*modulo2(d);
+    } else {
+// the case for align != displace is different, sob:
+      dist+=displace[iat]*modulo2(d);
+// these are the derivatives assuming the roto-translation as frozen
+      derivatives[iat]=2*displace[iat]*d;
+// here I accumulate derivatives wrt rotation matrix ..
+      ddist_drotation+=-2*displace[iat]*extProduct(d,reference[iat]);
+// .. and cpositions
+      ddist_dcpositions+=-2*displace[iat]*d;
+    }
+  }
+
+  if(!alEqDis) {
+    Tensor ddist_drr01;
+    for(unsigned i=0; i<3; i++) for(unsigned j=0; j<3; j++) ddist_drr01+=ddist_drotation[i][j]*drotation_drr01[i][j];
+    for(unsigned iat=0; iat<n; iat++) {
+// this is propagating to positions.
+// I am implicitly using the derivative of rr01 wrt positions here
+      derivatives[iat]+=matmul(ddist_drr01,reference[iat])*align[iat];
+      derivatives[iat]+=ddist_dcpositions*align[iat];
+    }
+  }
+
+  if(!squared) {
+    dist=std::sqrt(dist);
+    if(!alEqDis) {
+      double xx=0.5/dist;
+      for(unsigned iat=0; iat<n; iat++) derivatives[iat]*=xx;
+    }
+  }
+
+  return dist;
+*/
 }
+
 template <bool safe,bool alEqDis>
 double RMSD::optimalAlignment_cpu(const  std::vector<double>  & align,
                               const  std::vector<double>  & displace,
@@ -972,8 +1189,11 @@ double RMSD::optimalAlignment(const  std::vector<double>  & align,
                               const std::vector<Vector> & positions,
                               const std::vector<Vector> & reference,
                               std::vector<Vector>  & derivatives, bool squared, bool gpu)const {
-  if (gpu) return optimalAlignment_gpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
-  else return optimalAlignment_cpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
+  // if (gpu) return optimalAlignment_gpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
+  // else return optimalAlignment_cpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
+  // if (gpu) return optimalAlignment_gpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
+  return optimalAlignment_cpu<safe,alEqDis>(align,displace,positions,reference,derivatives,squared);
+
 }
 #else
 /// note that this method is intended to be repeatedly invoked
@@ -2105,4 +2325,16 @@ template double RMSD::optimalAlignment<false,false>(const  std::vector<double>  
 
 
 
+template double RMSD::optimalAlignment_gpu<true, true>(const  std::vector<double>  & align,
+                              const  std::vector<double>  & displace,
+                              const std::vector<Vector>& pos,
+                              af::array& all_positions_device, const std::vector<int> &indexes_device, 
+                              const std::vector<Vector> & reference,
+                              std::vector<Vector>  & derivatives, bool squared) const;
+template double RMSD::optimalAlignment_gpu<true, false>(const  std::vector<double>  & align,
+                              const  std::vector<double>  & displace,
+                              const std::vector<Vector>& pos,
+                              af::array& all_positions_device, const std::vector<int> &indexes_device, 
+                              const std::vector<Vector> & reference,
+                              std::vector<Vector>  & derivatives, bool squared) const;
 }

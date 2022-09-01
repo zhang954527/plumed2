@@ -66,7 +66,8 @@ Action::Action(const ActionOptions&ao):
   log(plumed.getLog()),
   comm(plumed.comm),
   multi_sim_comm(plumed.multi_sim_comm),
-  keywords(ao.keys)
+  keywords(ao.keys),
+  gpu(false)
 {
   line.erase(line.begin());
   log.printf("Action %s\n",name.c_str());

@@ -34,6 +34,7 @@ public:
   explicit OptimalRMSD(const ReferenceConfigurationOptions& ro);
   void read( const PDB& ) override;
   double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const override;
+  double calc_gpu( const std::vector<Vector>& pos, af::array& pos_device, const std::vector<int> &indexes_device, ReferenceValuePack& myder, const bool& squared) const override;
   bool pcaIsEnabledForThisReference() override { return true; }
   void setupRMSDObject() override { myrmsd.clear(); myrmsd.set(getAlign(),getDisplace(),getReferencePositions(),"OPTIMAL"); }
   void setupPCAStorage( ReferenceValuePack& mypack ) override {
@@ -57,6 +58,21 @@ OptimalRMSD::OptimalRMSD(const ReferenceConfigurationOptions& ro ):
 
 void OptimalRMSD::read( const PDB& pdb ) {
   readReference( pdb ); setupRMSDObject();
+}
+double OptimalRMSD::calc_gpu(const std::vector<Vector>& pos, af::array& pos_device, const std::vector<int> &indexes_device, ReferenceValuePack& myder, const bool& squared) const {
+  double d;
+  //  printf("OptimalRMSD::calc_gpu begin\n");
+
+  if( getAlign()==getDisplace() ) d=myrmsd.optimalAlignment_gpu<true,true>(getAlign(),getDisplace(),pos,pos_device,indexes_device,getReferencePositions(),myder.getAtomVector(),squared);
+  else d=myrmsd.optimalAlignment_gpu<true,false>(getAlign(),getDisplace(),pos, pos_device,indexes_device,getReferencePositions(),myder.getAtomVector(),squared);
+
+  // printf("OptimalRMSD::calc_gpu d = %f\n", d);
+
+  myder.clear(); for(unsigned i=0; i<indexes_device.size(); ++i) myder.setAtomDerivatives( i, myder.getAtomVector()[i] );
+  if( !myder.updateComplete() ) myder.updateDynamicLists();
+  // printf("OptimalRMSD::calc_gpu return d = %f\n", d);
+
+  return d;
 }
 
 double OptimalRMSD::calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {

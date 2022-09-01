@@ -33,6 +33,9 @@ double RMSDBase::calculate( const std::vector<Vector>& pos, ReferenceValuePack& 
 //  clearDerivatives();
   return calc( pos, myder, squared, gpu );
 }
+double RMSDBase::calculate_gpu( const std::vector<Vector>& pos, af::array& pos_device, const std::vector<int> &indexes_device, ReferenceValuePack& myder, const bool& squared) const {
+  return calc_gpu(pos, pos_device,indexes_device,myder, squared);
+}
 
 double RMSDBase::calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared, const bool& gpu ) const {
   plumed_dbg_assert( pos.size()==getNumberOfAtoms() );

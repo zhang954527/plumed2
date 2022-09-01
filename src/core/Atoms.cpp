@@ -242,16 +242,29 @@ void Atoms::share(const std::vector<AtomNumber>& unique) {
   atomsNeeded=false;
 
   if(!(int(gatindex.size())==natoms && shuffledAtoms==0)) {
+    // printf("Atoms::share if \n");
     uniq_index.resize(unique.size());
     for(unsigned i=0; i<unique.size(); i++) uniq_index[i]=g2l[unique[i].index()];
     mdatoms->getPositions(unique,uniq_index,positions);
   } else if(unique_serial) {
+    // printf("Atoms::share unique_serial \n");
     uniq_index.resize(unique.size());
     for(unsigned i=0; i<unique.size(); i++) uniq_index[i]=unique[i].index();
-    mdatoms->getPositions(unique,uniq_index,positions);
+    std::vector<double> positions_host;
+    positions_host.resize(3*unique.size());
+    mdatoms->getPositions(unique,uniq_index,positions,positions_host);
+    positions_device = af::array(3, unique.size(), &positions_host.front());
+    // printf("Atoms::share dims = [%lld %lld %d]\n", positions_device.dims(0), positions_device.dims(1), unique.size()); // 4
   } else {
+    // printf("Atoms::share else \n");
+    std::vector<double> positions_host;
+    positions_host.resize(3*unique.size());
+    
 // faster version, which retrieves all atoms
-    mdatoms->getPositions(0,natoms,positions);
+    mdatoms->getPositions(0,natoms,positions,positions_host);
+    positions_device = af::array(3, unique.size(), &positions_host.front());
+    // printf("Atoms::share else: dims = [%lld %lld %d]\n", positions_device.dims(0), positions_device.dims(1), unique.size()); // 4
+
   }
 
 

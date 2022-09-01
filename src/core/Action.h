@@ -84,6 +84,7 @@ public:
 
 public:
   typedef std::vector<Action*> Dependencies;
+  bool gpu;
 
 private:
 /// Actions on which this Action depends.

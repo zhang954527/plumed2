@@ -33,6 +33,7 @@
 #include <map>
 #include <string>
 #include <memory>
+#include <arrayfire.h>
 
 namespace PLMD {
 
@@ -143,6 +144,7 @@ class Atoms
   void share(const std::vector<AtomNumber>&);
 
 public:
+  af::array positions_device;
 
   explicit Atoms(PlumedMain&plumed);
   ~Atoms();

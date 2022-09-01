@@ -122,7 +122,9 @@ public:
   void getBox(Tensor &) const override;
   void getPositions(const std::vector<int>&index,std::vector<Vector>&positions) const override;
   void getPositions(const std::vector<AtomNumber>&index,const std::vector<unsigned>&i,std::vector<Vector>&positions) const override;
+  void getPositions(const std::vector<AtomNumber>&index,const std::vector<unsigned>&i,std::vector<Vector>&positions,std::vector<double>&positions_host) const override;
   void getPositions(unsigned j,unsigned k,std::vector<Vector>&positions) const override;
+  void getPositions(unsigned i,unsigned j,std::vector<Vector>&p,std::vector<double>&ph)const override;
   void getLocalPositions(std::vector<Vector>&p) const override;
   void getMasses(const std::vector<int>&index,std::vector<double>&) const override;
   void getCharges(const std::vector<int>&index,std::vector<double>&) const override;
@@ -193,6 +195,54 @@ void MDAtomsTyped<T>::getPositions(const std::vector<AtomNumber>&index,const std
     positions[p.index()][1]=ppy[stride*i[k]]*scalep;
     positions[p.index()][2]=ppz[stride*i[k]]*scalep;
     k++;
+  }
+}
+
+template <class T>
+void MDAtomsTyped<T>::getPositions(const std::vector<AtomNumber>&index,const std::vector<unsigned>&i, std::vector<Vector>&positions, std::vector<double>&positions_host)const {
+  unsigned stride;
+  const T* ppx;
+  const T* ppy;
+  const T* ppz;
+#ifndef NDEBUG
+// bounds are only checked in debug mode since they require this extra step that is potentially expensive
+  const unsigned maxel=(i.size()>0?*std::max_element(i.begin(),i.end())+1:0);
+#else
+  const unsigned maxel=0;
+#endif
+  getPointers(p,px,py,pz,maxel,ppx,ppy,ppz,stride);
+  plumed_assert(index.size()==0 || (ppx && ppy && ppz));
+// cannot be parallelized with omp because access to positions is not ordered
+  unsigned k=0;
+  for(const auto & p : index) {
+    positions[p.index()][0]=ppx[stride*i[k]]*scalep;
+    positions[p.index()][1]=ppy[stride*i[k]]*scalep;
+    positions[p.index()][2]=ppz[stride*i[k]]*scalep;
+
+    positions_host[3*k]   = positions[p.index()][0];
+    positions_host[3*k+1] = positions[p.index()][1];
+    positions_host[3*k+2] = positions[p.index()][2];
+    k++;
+  }
+}
+
+template <class T>
+void MDAtomsTyped<T>::getPositions(unsigned j,unsigned k,std::vector<Vector>&positions,std::vector<double>&positions_host)const {
+  unsigned stride;
+  const T* ppx;
+  const T* ppy;
+  const T* ppz;
+  getPointers(p,px,py,pz,k,ppx,ppy,ppz,stride);
+  plumed_assert(k==j || (ppx && ppy && ppz));
+  #pragma omp parallel for num_threads(OpenMP::getGoodNumThreads(&positions[j],(k-j)))
+  for(unsigned i=j; i<k; ++i) {
+    positions[i][0]=ppx[stride*i]*scalep;
+    positions[i][1]=ppy[stride*i]*scalep;
+    positions[i][2]=ppz[stride*i]*scalep;
+
+    positions_host[3*i]   = positions[i][0];
+    positions_host[3*i+1] = positions[i][1];
+    positions_host[3*i+2] = positions[i][2];
   }
 }
 

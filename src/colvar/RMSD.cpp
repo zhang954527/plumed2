@@ -37,7 +37,6 @@ class RMSD : public Colvar {
   std::unique_ptr<PLMD::RMSDBase> rmsd;
   bool squared;
   bool nopbc;
-  bool gpu;
 
 public:
   explicit RMSD(const ActionOptions&);
@@ -234,7 +233,18 @@ RMSD::RMSD(const ActionOptions&ao):
 // calculator
 void RMSD::calculate() {
   if(!nopbc) makeWhole();
-  double r=rmsd->calculate( getPositions(), mypack, squared, gpu );
+  double r;
+  if (!gpu)
+    r = rmsd->calculate( getPositions(), mypack, squared, false );
+  else {
+    const std::vector<AtomNumber> & abindex= getAbsoluteIndexes();
+    std::vector<int> indexes_device;
+    indexes_device.resize(abindex.size());
+    for (int i = 0; i < abindex.size(); i++)
+      indexes_device[i] = abindex[i].index();
+    r = rmsd->calculate_gpu(getPositions(), atoms.positions_device, indexes_device, mypack, squared);
+    // printf("RMSD::calculate r = %f\n", r);
+  }
 
   setValue(r);
   for(unsigned i=0; i<getNumberOfAtoms(); i++) setAtomsDerivatives( i, mypack.getAtomDerivative(i) );

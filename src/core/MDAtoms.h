@@ -87,8 +87,10 @@ public:
   virtual void getPositions(const std::vector<int>&index,std::vector<Vector>&p)const=0;
 /// Retrieve all atom positions from index i to index j.
   virtual void getPositions(unsigned i,unsigned j,std::vector<Vector>&p)const=0;
+  virtual void getPositions(unsigned i,unsigned j,std::vector<Vector>&p,std::vector<double>&ph)const=0;
 /// Retrieve all atom positions from atom indices and local indices.
   virtual void getPositions(const std::vector<AtomNumber>&index,const std::vector<unsigned>&i,std::vector<Vector>&p)const=0;
+  virtual void getPositions(const std::vector<AtomNumber>&index,const std::vector<unsigned>&i,std::vector<Vector>&p,std::vector<double>&ph)const=0;
 /// Retrieve selected masses.
 /// The operation is done in such a way that m[index[i]] is equal to the mass of atom i
   virtual void getMasses(const std::vector<int>&index,std::vector<double>&m)const=0;
