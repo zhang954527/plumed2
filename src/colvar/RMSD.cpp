@@ -37,6 +37,7 @@ class RMSD : public Colvar {
   std::unique_ptr<PLMD::RMSDBase> rmsd;
   bool squared;
   bool nopbc;
+  bool gpu;
 
 public:
   explicit RMSD(const ActionOptions&);
@@ -166,6 +167,7 @@ void RMSD::registerKeywords(Keywords& keys) {
   keys.add("compulsory","REFERENCE","a file in pdb format containing the reference structure and the atoms involved in the CV.");
   keys.add("compulsory","TYPE","SIMPLE","the manner in which RMSD alignment is performed.  Should be OPTIMAL or SIMPLE.");
   keys.addFlag("SQUARED",false," This should be set if you want mean squared displacement instead of RMSD ");
+  keys.addFlag("GPU",false," This should be set if you want to use arrayfire for RMSD with GPU ");
 }
 
 RMSD::RMSD(const ActionOptions&ao):
@@ -182,6 +184,16 @@ RMSD::RMSD(const ActionOptions&ao):
   parse("TYPE",type);
   parseFlag("SQUARED",squared);
   parseFlag("NOPBC",nopbc);
+  std::string gpuuse;
+  gpuuse.assign("off");
+  parse("GPU",gpuuse);
+
+  if (gpuuse=="on" || gpuuse=="ON")
+    gpu = true;
+  else if (gpuuse=="off" || gpuuse=="OFF")
+    gpu = false;
+  else
+    plumed_merror("unknown GPU on/off");
 
   checkRead();
 
@@ -222,7 +234,11 @@ RMSD::RMSD(const ActionOptions&ao):
 // calculator
 void RMSD::calculate() {
   if(!nopbc) makeWhole();
-  double r=rmsd->calculate( getPositions(), mypack, squared );
+  double r;
+  if (!gpu)
+    r=rmsd->calculate( getPositions(), mypack, squared );
+  else
+    r=rmsd->calculate_gpu( getPositions(), mypack, squared );
 
   setValue(r);
   for(unsigned i=0; i<getNumberOfAtoms(); i++) setAtomsDerivatives( i, mypack.getAtomDerivative(i) );

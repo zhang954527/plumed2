@@ -34,6 +34,7 @@ public:
   explicit OptimalRMSD(const ReferenceConfigurationOptions& ro);
   void read( const PDB& ) override;
   double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const override;
+  double calc_gpu( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const override;
   bool pcaIsEnabledForThisReference() override { return true; }
   void setupRMSDObject() override { myrmsd.clear(); myrmsd.set(getAlign(),getDisplace(),getReferencePositions(),"OPTIMAL"); }
   void setupPCAStorage( ReferenceValuePack& mypack ) override {
@@ -57,6 +58,25 @@ OptimalRMSD::OptimalRMSD(const ReferenceConfigurationOptions& ro ):
 
 void OptimalRMSD::read( const PDB& pdb ) {
   readReference( pdb ); setupRMSDObject();
+}
+
+double OptimalRMSD::calc_gpu( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const {
+  double d;
+  if( myder.calcUsingPCAOption() ) {
+    std::vector<Vector> centeredreference( getNumberOfAtoms () );
+    d=myrmsd.calc_PCAelements(pos,myder.getAtomVector(),myder.rot[0],myder.DRotDPos,myder.getAtomsDisplacementVector(),myder.centeredpos,centeredreference,squared);
+    unsigned nat = pos.size();
+    for(unsigned i=0; i<nat; ++i) { myder.getAtomsDisplacementVector()[i] -= getReferencePosition(i); myder.getAtomsDisplacementVector()[i] *= getDisplace()[i]; }
+  } else if( fast ) {
+    if( getAlign()==getDisplace() ) d=myrmsd.optimalAlignment_gpu<false,true>(pos,myder.getAtomVector(),squared);
+    else d=myrmsd.optimalAlignment_gpu<false,false>(pos,myder.getAtomVector(),squared);
+  } else {
+    if( getAlign()==getDisplace() ) d=myrmsd.optimalAlignment_gpu<true,true>(pos,myder.getAtomVector(),squared);
+    else d=myrmsd.optimalAlignment_gpu<true,false>(pos,myder.getAtomVector(),squared);
+  }
+  myder.clear(); for(unsigned i=0; i<pos.size(); ++i) myder.setAtomDerivatives( i, myder.getAtomVector()[i] );
+  if( !myder.updateComplete() ) myder.updateDynamicLists();
+  return d;
 }
 
 double OptimalRMSD::calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const {

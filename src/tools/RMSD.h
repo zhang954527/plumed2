@@ -80,6 +80,15 @@ class RMSD
   Vector positions_center;
   bool positions_center_is_calculated;
   bool positions_center_is_removed;
+// arrayfire GPU variable for rmsd calculation
+  double rr11;
+  af::array reference_device;
+  af::array align_device;
+  af::array displace_device;
+  mutable std::vector<double> rr01_host;
+  mutable std::vector<double> cpositions_host;
+  mutable std::vector<double> ddist_drotation_host;
+  mutable std::vector<double> derivatives_host;
 // calculates the center from the position provided
   Vector calculateCenter(const std::vector<Vector> &p,const std::vector<double> &w) {
     plumed_massert(p.size()==w.size(),"mismatch in dimension of position/align arrays while calculating the center");
@@ -110,12 +119,23 @@ public:
 /// set reference coordinates, remove the com by using uniform weights
   void setReference(const std::vector<Vector> & reference);
   std::vector<Vector> getReference();
+  void setReference_gpu(af::array & reference_device, const std::vector<Vector> & reference, int n);
+  af::array getReference_gpu();
 /// set weights and remove the center from reference with normalized weights. If the com has been removed, it resets to the new value
   void setAlign(const std::vector<double> & align, bool normalize_weights=true, bool remove_center=true);
   std::vector<double> getAlign();
+  void setAlign_gpu(af::array & align_device, const std::vector<double> & align, int n);
+  af::array getAlign_gpu();
 /// set align
   void setDisplace(const std::vector<double> & displace, bool normalize_weights=true);
   std::vector<double> getDisplace();
+  void setDisplace_gpu(af::array & displace_device, const std::vector<double> & displace, int n);
+  af::array getDisplace_gpu();
+/// set rr11 for gpu calculate
+  void setr11_gpu(double & r11);
+  double getr11_gpu();
+/// set host transfer memory
+  void setHostmem_gpu(std::vector<double> & derivatives_host, std::vector<double> & rr01_host, std::vector<double> & cpositions_host, std::vector<double> & ddist_drotation_host, int n);
 ///
   std::string getMethod();
 /// workhorses
@@ -126,6 +146,9 @@ public:
                          std::vector<Vector>  & derivatives,
                          std::vector<Vector>  & displacement,
                          bool squared=false)const;
+  template <bool safe,bool alEqDis>
+  double optimalAlignment_gpu(const std::vector<Vector> & positions,
+                          std::vector<Vector>  & DDistDPos, bool squared=false)const;
   template <bool safe,bool alEqDis>
   double optimalAlignment(const  std::vector<double>  & align,
                           const  std::vector<double>  & displace,

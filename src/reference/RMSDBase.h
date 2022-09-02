@@ -37,7 +37,9 @@ public:
   explicit RMSDBase( const ReferenceConfigurationOptions& ro );
   double calc( const std::vector<Vector>& pos, const Pbc& pbc, ReferenceValuePack& myder, const bool& squared ) const override;
   double calculate( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const ;
+  double calculate_gpu( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const ;
   virtual double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const=0;
+  virtual double calc_gpu( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const=0;
 };
 
 }

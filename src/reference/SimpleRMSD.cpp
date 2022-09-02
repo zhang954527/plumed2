@@ -32,6 +32,7 @@ public:
   explicit SimpleRMSD( const ReferenceConfigurationOptions& ro );
   void read( const PDB& ) override;
   double calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const override;
+  double calc_gpu( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const override;
   bool pcaIsEnabledForThisReference() override { return true; }
   void setupPCAStorage( ReferenceValuePack& mypack ) override {
     mypack.switchOnPCAOption(); mypack.getAtomsDisplacementVector().resize( getNumberOfAtoms() );
@@ -50,6 +51,12 @@ SimpleRMSD::SimpleRMSD( const ReferenceConfigurationOptions& ro ):
 
 void SimpleRMSD::read( const PDB& pdb ) {
   readReference( pdb );
+}
+
+double SimpleRMSD::calc_gpu( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const {
+  double d = 0.01, ret;
+  ret = d*d;
+  return ret;
 }
 
 double SimpleRMSD::calc( const std::vector<Vector>& pos, ReferenceValuePack& myder, const bool& squared ) const {
