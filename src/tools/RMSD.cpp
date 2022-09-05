@@ -213,7 +213,7 @@ af::array RMSD::getDisplace_gpu() {
   return displace_device;
 }
 void RMSD::setr11_gpu(double & r11) {
-  // this->rr11 = r11;
+  // 1,1,1,1
   rr11 = af::sum<double>(af::sum(reference_device*reference_device)*align_device);
 }
 double RMSD::getr11_gpu() {
